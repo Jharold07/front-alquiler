@@ -210,6 +210,8 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
             </label>
             <input
               type="text"
+              inputMode="text"
+              autoComplete="name"
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               placeholder={tipo === 'persona' ? 'Ej. María Elena Quispe' : 'Ej. Distribuidora del Norte SAC'}
@@ -228,6 +230,8 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
                 <FileText size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
                   value={documento}
                   onChange={(e) => setDocumento(e.target.value)}
                   placeholder={tipo === 'persona' ? '42318765' : '20512345678'}

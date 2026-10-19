@@ -138,6 +138,7 @@ export function CreateSpaceModal({ defaultType, onClose, onCreated }: Props) {
             </label>
             <input
               type="text"
+              inputMode="text"
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               placeholder={tipo === 'cuarto' ? 'Ej. 104, 203' : 'Ej. Local E, Stand 12'}
@@ -171,6 +172,7 @@ export function CreateSpaceModal({ defaultType, onClose, onCreated }: Props) {
               <Layers size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
+                inputMode="text"
                 value={piso}
                 onChange={(e) => setPiso(e.target.value)}
                 placeholder="PISO 1, PLANTA BAJA, AZOTEA..."

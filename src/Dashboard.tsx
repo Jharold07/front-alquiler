@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Bell,
   TrendingUp,
   AlertTriangle,
   Clock,
@@ -12,6 +11,7 @@ import {
   Calendar,
   RefreshCw,
   Loader2,
+  PlusSquare,
 } from 'lucide-react';
 import { statusConfig, modalityLabel, getCurrentMonthLabel } from './data';
 import type { AlertItem, AlertStatus } from './types';
@@ -29,6 +29,11 @@ export function Dashboard({ onOpenTenant }: Props) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [paymentTarget, setPaymentTarget] = useState<AlertItem | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthLabel);
+  // PWA install prompt
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const deferredPrompt = useRef<any>(null);
+  const [canInstall, setCanInstall] = useState(false);
+  const [installHint, setInstallHint] = useState(false);
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -171,6 +176,33 @@ export function Dashboard({ onOpenTenant }: Props) {
     fetchDashboardData();
   }, [fetchDashboardData]);
 
+  // Captura el evento de instalación PWA
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function handleBeforeInstall(e: any) {
+      e.preventDefault();
+      deferredPrompt.current = e;
+      setCanInstall(true);
+    }
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  async function handleInstall() {
+    if (deferredPrompt.current) {
+      deferredPrompt.current.prompt();
+      const { outcome } = await deferredPrompt.current.userChoice;
+      if (outcome === 'accepted') {
+        setCanInstall(false);
+      }
+      deferredPrompt.current = null;
+    } else {
+      // En iOS o si ya está instalada, mostrar hint
+      setInstallHint(true);
+      setTimeout(() => setInstallHint(false), 3500);
+    }
+  }
+
   async function handleRefresh() {
     setIsRefreshing(true);
     await fetchDashboardData();
@@ -210,15 +242,27 @@ export function Dashboard({ onOpenTenant }: Props) {
             >
               <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
             </button>
-            <button
-              aria-label="Notificaciones"
-              className="relative h-11 w-11 rounded-full bg-white/15 flex items-center justify-center text-white hover:bg-white/25 transition"
-            >
-              <Bell size={20} />
-              {vencidos.length > 0 && (
-                <span className="absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full bg-red-400 border-2 border-blue-600" />
+
+            {/* Botón instalar PWA */}
+            <div className="relative">
+              <button
+                onClick={handleInstall}
+                aria-label="Agregar app a pantalla de inicio"
+                className={`h-11 w-11 rounded-full flex items-center justify-center text-white transition active:scale-95 ${
+                  canInstall
+                    ? 'bg-white/30 hover:bg-white/40 ring-2 ring-white/50'
+                    : 'bg-white/15 hover:bg-white/25'
+                }`}
+              >
+                <PlusSquare size={20} />
+              </button>
+              {installHint && (
+                <div className="absolute top-13 right-0 w-52 bg-white text-gray-800 text-xs font-medium rounded-2xl shadow-xl p-3 z-50 leading-relaxed">
+                  <p className="font-bold text-gray-900 mb-0.5">Agregar a inicio</p>
+                  <p>En Safari, toca <strong>Compartir</strong> → <strong>"Agregar a inicio"</strong>. En Chrome, usa el menú ⋮ → <strong>"Instalar app"</strong>.</p>
+                </div>
               )}
-            </button>
+            </div>
           </div>
         </div>
 
