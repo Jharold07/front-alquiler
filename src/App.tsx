@@ -1,12 +1,25 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Home, Building2, Users, History as HistoryIcon } from 'lucide-react';
 import { Dashboard } from './Dashboard';
 import { Spaces } from './Spaces';
 import { Tenants } from './Tenants';
 import { History } from './History';
 import { TenantProfile } from './TenantProfile';
+import { supabase } from './lib/supabase';
 
 type Tab = 'inicio' | 'espacios' | 'inquilinos' | 'historial';
+
+useEffect(() => {
+  async function probarConexion() {
+    const { data, error } = await supabase.from('espacios').select('*');
+    if (error) {
+      console.error('Error al conectar con Supabase:', error);
+    } else {
+      console.log('¡Conexión exitosa! Espacios encontrados:', data);
+    }
+  }
+  probarConexion();
+}, []);
 
 const tabs: { id: Tab; label: string; icon: typeof Home }[] = [
   { id: 'inicio', label: 'Inicio', icon: Home },
@@ -78,18 +91,16 @@ function App() {
                     className="flex flex-col items-center gap-1 py-1.5 transition"
                   >
                     <div
-                      className={`h-9 w-9 rounded-2xl flex items-center justify-center transition-all ${
-                        active
+                      className={`h-9 w-9 rounded-2xl flex items-center justify-center transition-all ${active
                           ? 'bg-blue-600 text-white scale-105 shadow-lg shadow-blue-600/30'
                           : 'text-gray-400'
-                      }`}
+                        }`}
                     >
                       <Icon size={20} />
                     </div>
                     <span
-                      className={`text-[11px] font-semibold ${
-                        active ? 'text-blue-600' : 'text-gray-400'
-                      }`}
+                      className={`text-[11px] font-semibold ${active ? 'text-blue-600' : 'text-gray-400'
+                        }`}
                     >
                       {t.label}
                     </span>
