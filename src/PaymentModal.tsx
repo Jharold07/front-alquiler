@@ -9,9 +9,12 @@ import {
   Landmark,
   Save,
   Trash2,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import type { PaymentMethod, PaymentModality, AlertItem } from './types';
-import { modalityLabel } from './data';
+import { modalityLabel, getCurrentMonthLabel } from './data';
+import { supabase } from './lib/supabase';
 
 interface Props {
   alert: AlertItem;
@@ -21,33 +24,144 @@ interface Props {
 
 const methods: { id: PaymentMethod; label: string; icon: typeof Banknote }[] = [
   { id: 'efectivo', label: 'Efectivo', icon: Banknote },
-  { id: 'yape', label: 'Yape / Plin', icon: Smartphone },
+  { id: 'yape_plin', label: 'Yape / Plin', icon: Smartphone },
   { id: 'transferencia', label: 'Transferencia', icon: Landmark },
 ];
 
 export function PaymentModal({ alert, onClose, onSave }: Props) {
-  const [modality, setModality] = useState<PaymentModality>(alert.modality);
+  const [modality, setModality] = useState<PaymentModality>(alert.modality || 'adelantado');
   const [amount, setAmount] = useState(alert.amount.toString());
-  const [method, setMethod] = useState<PaymentMethod>('efectivo');
+  const [method, setMethod] = useState<PaymentMethod>('yape_plin');
   const [observations, setObservations] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [voucherPreview, setVoucherPreview] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (file) {
+      setSelectedFile(file);
       const reader = new FileReader();
       reader.onload = (ev) => setVoucherPreview(ev.target?.result as string);
       reader.readAsDataURL(file);
     }
   }
 
-  function handleSave() {
-    setSaved(true);
-    setTimeout(() => {
-      onSave();
-    }, 900);
+  function handleRemoveFile() {
+    setSelectedFile(null);
+    setVoucherPreview(null);
+    if (fileRef.current) {
+      fileRef.current.value = '';
+    }
+  }
+
+  async function handleSave() {
+    if (!amount || parseFloat(amount) <= 0) {
+      setErrorMessage('Por favor ingresa un monto válido.');
+      return;
+    }
+
+    setIsSaving(true);
+    setErrorMessage(null);
+
+    try {
+      let voucherUrl: string | null = alert.voucherUrl || null;
+
+      // 1. Subir comprobante al bucket 'comprobantes' si se adjuntó un archivo
+      if (selectedFile) {
+        const fileExt = selectedFile.name.split('.').pop() || 'png';
+        const cleanName = selectedFile.name.replace(/[^a-zA-Z0-9]/g, '_');
+        const fileName = `${Date.now()}_${cleanName}.${fileExt}`;
+        const filePath = `vouchers/${fileName}`;
+
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('comprobantes')
+          .upload(filePath, selectedFile, {
+            cacheControl: '3600',
+            upsert: true,
+          });
+
+        if (uploadError) {
+          console.warn('Error al subir voucher a Storage:', uploadError);
+          // Si falló por RLS u otra razón, registramos advertencia pero no bloqueamos el registro del pago
+          if (uploadError.message.includes('row-level security') || uploadError.message.includes('Unauthorized')) {
+            console.warn(
+              "Aviso: El bucket 'comprobantes' requiere habilitar una política RLS de INSERT pública para almacenar el archivo."
+            );
+          }
+        } else if (uploadData?.path) {
+          const { data: publicUrlData } = supabase.storage
+            .from('comprobantes')
+            .getPublicUrl(uploadData.path);
+          voucherUrl = publicUrlData.publicUrl;
+        }
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      const parsedAmount = parseFloat(amount);
+      const targetPaymentId = alert.id || alert.paymentId;
+
+      // 2. Guardar en la tabla 'pagos'
+      if (targetPaymentId) {
+        // Actualizar pago existente (que estaba pendiente o vencido)
+        const { error: updateError } = await supabase
+          .from('pagos')
+          .update({
+            monto: parsedAmount,
+            metodo: method,
+            fecha_pago: today,
+            estado: 'pagado',
+            comprobante_url: voucherUrl,
+            observacion: observations.trim() || null,
+          })
+          .eq('id', targetPaymentId);
+
+        if (updateError) {
+          throw updateError;
+        }
+      } else if (alert.contratoId) {
+        // Insertar nuevo registro de pago asociado al contrato
+        const { error: insertError } = await supabase
+          .from('pagos')
+          .insert({
+            contrato_id: alert.contratoId,
+            mes_correspondiente: alert.month || getCurrentMonthLabel(),
+            monto: parsedAmount,
+            fecha_vencimiento: alert.dueDate || today,
+            fecha_pago: today,
+            metodo: method,
+            estado: 'pagado',
+            comprobante_url: voucherUrl,
+            observacion: observations.trim() || null,
+          });
+
+        if (insertError) {
+          throw insertError;
+        }
+      }
+
+      // Si la modalidad cambió y tenemos contratoId, actualizar contrato
+      if (alert.contratoId && modality !== alert.modality) {
+        await supabase
+          .from('contratos')
+          .update({ modalidad: modality })
+          .eq('id', alert.contratoId);
+      }
+
+      setSaved(true);
+      setTimeout(() => {
+        onSave();
+      }, 700);
+    } catch (err: unknown) {
+      console.error('Error al registrar pago en Supabase:', err);
+      const msg = err instanceof Error ? err.message : 'Error al guardar el pago.';
+      setErrorMessage(msg);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   const spaceLabel = `${alert.space.floor} · ${alert.space.number}`;
@@ -60,12 +174,13 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
       />
       <div className="relative w-full max-w-[420px] bg-white rounded-t-3xl sm:rounded-3xl max-h-[92vh] overflow-y-auto animate-slide-up shadow-2xl">
         {/* Handle */}
-        <div className="sticky top-0 bg-white pt-3 pb-2 rounded-t-3xl z-10">
+        <div className="sticky top-0 bg-white pt-3 pb-2 rounded-t-3xl z-10 border-b border-gray-100">
           <div className="mx-auto h-1.5 w-10 rounded-full bg-gray-300" />
           <div className="flex items-center justify-between px-5 pt-3">
             <h2 className="text-lg font-bold text-gray-900">Registrar Pago</h2>
             <button
               onClick={onClose}
+              disabled={isSaving}
               className="h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition"
             >
               <X size={18} />
@@ -73,7 +188,14 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
           </div>
         </div>
 
-        <div className="px-5 pb-8 pt-1">
+        <div className="px-5 pb-8 pt-3">
+          {errorMessage && (
+            <div className="mb-4 rounded-2xl bg-red-50 border border-red-200 p-3.5 flex items-start gap-2 text-xs text-red-700">
+              <AlertCircle size={16} className="shrink-0 mt-0.5 text-red-500" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
           {/* Auto data */}
           <div className="rounded-2xl bg-blue-50 border border-blue-100 p-4 mb-5">
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 mb-2">
@@ -92,7 +214,9 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Mes</span>
-                <span className="font-semibold text-gray-900">Octubre 2026</span>
+                <span className="font-semibold text-gray-900">
+                  {alert.month || getCurrentMonthLabel()}
+                </span>
               </div>
             </div>
           </div>
@@ -101,29 +225,31 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
           <p className="text-sm font-semibold text-gray-900 mb-2">
             Modalidad de pago
           </p>
-          <div className="grid grid-cols-2 gap-3 mb-5">
+          <div className="grid grid-cols-2 gap-3 mb-2">
             <button
+              type="button"
               onClick={() => setModality('adelantado')}
               className={`rounded-2xl border-2 p-3 text-sm font-semibold transition ${
                 modality === 'adelantado'
-                  ? 'border-blue-600 bg-blue-600 text-white'
-                  : 'border-gray-200 bg-white text-gray-700'
+                  ? 'border-blue-600 bg-blue-600 text-white shadow-sm'
+                  : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
               }`}
             >
-              Pago Adelantado
+              Mes Adelantado
             </button>
             <button
-              onClick={() => setModality('cumplido')}
+              type="button"
+              onClick={() => setModality('vencido')}
               className={`rounded-2xl border-2 p-3 text-sm font-semibold transition ${
-                modality === 'cumplido'
-                  ? 'border-blue-600 bg-blue-600 text-white'
-                  : 'border-gray-200 bg-white text-gray-700'
+                modality === 'vencido'
+                  ? 'border-blue-600 bg-blue-600 text-white shadow-sm'
+                  : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
               }`}
             >
-              Mes Cumplido
+              Mes Vencido / Cumplido
             </button>
           </div>
-          <p className="text-xs text-gray-500 -mt-3 mb-5">
+          <p className="text-xs text-gray-500 mb-5">
             Seleccionado: <span className="font-semibold">{modalityLabel[modality]}</span>
           </p>
 
@@ -145,18 +271,19 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
 
           {/* Payment method */}
           <p className="text-sm font-semibold text-gray-900 mb-2">Método de pago</p>
-          <div className="grid grid-cols-3 gap-3 mb-5">
+          <div className="grid grid-cols-3 gap-2.5 mb-5">
             {methods.map((m) => {
               const Icon = m.icon;
               const active = method === m.id;
               return (
                 <button
+                  type="button"
                   key={m.id}
                   onClick={() => setMethod(m.id)}
                   className={`flex flex-col items-center gap-1.5 rounded-2xl border-2 p-3 transition ${
                     active
-                      ? 'border-blue-600 bg-blue-50'
-                      : 'border-gray-200 bg-white'
+                      ? 'border-blue-600 bg-blue-50 shadow-sm'
+                      : 'border-gray-200 bg-white hover:border-gray-300'
                   }`}
                 >
                   <Icon
@@ -175,10 +302,16 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
             })}
           </div>
 
-          {/* Voucher upload */}
-          <p className="text-sm font-semibold text-gray-900 mb-2">
-            Comprobante de pago
-          </p>
+          {/* Voucher upload to Supabase Storage 'comprobantes' */}
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-semibold text-gray-900">
+              Comprobante de pago (Voucher)
+            </p>
+            <span className="text-[11px] font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+              Supabase Storage
+            </span>
+          </div>
+
           <input
             ref={fileRef}
             type="file"
@@ -187,6 +320,7 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
             onChange={handleFile}
             className="hidden"
           />
+
           {voucherPreview ? (
             <div className="relative mb-5">
               <img
@@ -195,27 +329,30 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
                 className="w-full rounded-2xl border-2 border-gray-200 object-cover max-h-56"
               />
               <button
-                onClick={() => setVoucherPreview(null)}
+                type="button"
+                onClick={handleRemoveFile}
                 className="absolute top-2 right-2 h-9 w-9 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg hover:bg-red-600 transition"
               >
                 <Trash2 size={16} />
               </button>
               <p className="text-xs text-green-600 font-semibold mt-2 flex items-center gap-1">
-                <Check size={14} /> Comprobante adjuntado
+                <Check size={14} /> Voucher listo para subir al bucket 'comprobantes'
               </p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 mb-5">
               <button
+                type="button"
                 onClick={() => fileRef.current?.click()}
-                className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-gray-300 py-5 text-gray-500 hover:border-blue-500 hover:text-blue-600 transition"
+                className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-gray-300 py-5 text-gray-500 hover:border-blue-500 hover:text-blue-600 transition bg-gray-50/50"
               >
                 <Camera size={24} />
                 <span className="text-xs font-semibold">Tomar foto</span>
               </button>
               <button
+                type="button"
                 onClick={() => fileRef.current?.click()}
-                className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-gray-300 py-5 text-gray-500 hover:border-blue-500 hover:text-blue-600 transition"
+                className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-gray-300 py-5 text-gray-500 hover:border-blue-500 hover:text-blue-600 transition bg-gray-50/50"
               >
                 <ImagePlus size={24} />
                 <span className="text-xs font-semibold">Subir imagen</span>
@@ -237,15 +374,24 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
 
           {/* Save button */}
           <button
+            type="button"
             onClick={handleSave}
-            disabled={saved}
+            disabled={isSaving || saved}
             className={`w-full rounded-2xl py-4 text-base font-bold text-white shadow-lg transition flex items-center justify-center gap-2 ${
-              saved ? 'bg-green-500' : 'bg-blue-600 hover:bg-blue-700'
+              saved
+                ? 'bg-green-500'
+                : isSaving
+                ? 'bg-blue-400 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700 active:scale-[0.99]'
             }`}
           >
             {saved ? (
               <>
-                <Check size={20} /> ¡Pago registrado!
+                <Check size={20} /> ¡Pago registrado con éxito!
+              </>
+            ) : isSaving ? (
+              <>
+                <Loader2 size={20} className="animate-spin" /> Guardando en Supabase...
               </>
             ) : (
               <>

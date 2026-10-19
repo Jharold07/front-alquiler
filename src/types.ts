@@ -1,64 +1,98 @@
 export type TenantType = 'persona' | 'empresa';
 
-export type PaymentModality = 'adelantado' | 'cumplido';
+export type PaymentModality = 'adelantado' | 'vencido';
 
-export type PaymentMethod = 'efectivo' | 'yape' | 'transferencia';
+export type PaymentMethod = 'efectivo' | 'yape_plin' | 'transferencia';
 
 export type SpaceType = 'cuarto' | 'local';
 
-export type SpaceStatus = 'ocupado' | 'disponible' | 'pendiente';
+export type SpaceStatus = 'disponible' | 'ocupado' | 'mantenimiento' | 'pendiente';
+
+export type PaymentStatus = 'pendiente' | 'pagado' | 'vencido';
 
 export type AlertStatus = 'vencido' | 'proximo' | 'aldia';
 
-export interface Tenant {
+// ================= Supabase Database Models =================
+export interface DbEspacio {
   id: string;
-  name: string;
-  type: TenantType;
-  phone: string;
-  document: string;
-  email?: string;
-  notes?: string;
+  nombre: string;
+  tipo: SpaceType;
+  piso: string;
+  rubro: string | null;
+  precio_sugerido: number;
+  estado: SpaceStatus;
+  creado_en?: string;
 }
 
-export interface Contract {
-  spaceId: string;
-  startDate: string;
-  duration: string;
-  modality: PaymentModality;
-  monthlyAmount: number;
-  paymentDay: number;
-}
-
-export interface Space {
+export interface DbInquilino {
   id: string;
-  type: SpaceType;
-  floor: string;
-  number: string;
-  status: SpaceStatus;
-  monthlyPrice: number;
-  tenantId?: string;
-  contract?: Contract;
+  nombre_razon_social: string;
+  tipo: TenantType;
+  documento_id: string;
+  telefono: string;
+  email: string | null;
+  creado_en?: string;
 }
 
-export interface Payment {
+export interface DbContrato {
   id: string;
-  tenantId: string;
-  spaceId: string;
-  month: string;
-  amount: number;
-  method: PaymentMethod;
-  modality: PaymentModality;
-  date: string;
-  voucherUrl?: string;
-  observations?: string;
+  espacio_id: string;
+  inquilino_id: string;
+  monto_mensual: number;
+  dia_de_pago: number;
+  modalidad: PaymentModality;
+  fecha_inicio: string;
+  fecha_fin: string | null;
+  activo: boolean;
+  creado_en?: string;
+  espacios?: DbEspacio;
+  inquilinos?: DbInquilino;
 }
 
+export interface DbPago {
+  id: string;
+  contrato_id: string;
+  mes_correspondiente: string;
+  monto: number;
+  fecha_vencimiento: string;
+  fecha_pago: string | null;
+  metodo: PaymentMethod | null;
+  comprobante_url: string | null;
+  observacion: string | null;
+  estado: PaymentStatus;
+  creado_en?: string;
+  contratos?: DbContrato & {
+    espacios?: DbEspacio;
+    inquilinos?: DbInquilino;
+  };
+}
+
+// ================= UI View Models =================
 export interface AlertItem {
-  tenant: Tenant;
-  space: Space;
+  id?: string; // id de pago en Supabase
+  contratoId?: string;
+  tenant: {
+    id: string;
+    name: string;
+    phone: string;
+    document: string;
+    type?: TenantType;
+    email?: string | null;
+  };
+  space: {
+    id: string;
+    number: string;
+    floor: string;
+    type?: SpaceType;
+  };
   status: AlertStatus;
   daysLate?: number;
   daysUntilDue?: number;
   amount: number;
   modality: PaymentModality;
+  month?: string;
+  dueDate?: string;
+  paymentDate?: string | null;
+  voucherUrl?: string | null;
+  paymentId?: string;
 }
