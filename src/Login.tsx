@@ -55,7 +55,7 @@ export function Login() {
           </div>
           <h1 className="text-2xl font-bold text-white">Gestión de Alquileres</h1>
           <p className="text-blue-100 text-sm mt-1.5 leading-relaxed">
-            Ingresa tus credenciales para<br />administrar los inmuebles
+            Casa de Techy
           </p>
         </div>
 
@@ -146,8 +146,10 @@ export function Login() {
 
         {/* Pie */}
         <p className="text-center text-xs text-blue-200/70 mt-6">
-          Solo usuarios autorizados pueden acceder
+          Aplicacion desarrollada por Jharold Meza 2026
         </p>
+        <br />
+        <p className="text-center text-xs text-blue-200/70 mt-6"></p>
       </div>
     </div>
   );
