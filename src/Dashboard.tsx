@@ -70,7 +70,8 @@ export function Dashboard({ onOpenTenant }: Props) {
               tipo,
               documento_id,
               telefono,
-              email
+              email,
+              contratos (espacios (id, nombre))
             )
           )
         `)
@@ -141,6 +142,12 @@ export function Dashboard({ onOpenTenant }: Props) {
               document: inquilino.documento_id || '',
               type: inquilino.tipo,
               email: inquilino.email,
+              spaceNumbers: Array.isArray(inquilino.contratos)
+                ? inquilino.contratos.flatMap((c: { espacios?: { nombre?: string } | { nombre?: string }[] | null }) => {
+                    const spaces = Array.isArray(c.espacios) ? c.espacios : c.espacios ? [c.espacios] : [];
+                    return spaces.map((space) => space.nombre).filter((name): name is string => Boolean(name));
+                  })
+                : [],
             },
             space: {
               id: espacio.id,

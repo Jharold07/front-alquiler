@@ -40,6 +40,7 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
   const [availableSpaces, setAvailableSpaces] = useState<DbEspacio[]>([]);
   const [loadingSpaces, setLoadingSpaces] = useState(true);
   const [selectedSpaceId, setSelectedSpaceId] = useState<string>('');
+  const [selectedSpaceIds, setSelectedSpaceIds] = useState<string[]>([]);
   const [montoMensual, setMontoMensual] = useState<string>('');
   const [diaDePago, setDiaDePago] = useState<number>(5);
   const [modalidad, setModalidad] = useState<PaymentModality>('adelantado');
@@ -58,6 +59,7 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
         setAvailableSpaces(spaces);
         if (spaces.length > 0) {
           setSelectedSpaceId(spaces[0].id);
+          setSelectedSpaceIds([spaces[0].id]);
           setMontoMensual(String(spaces[0].precio_sugerido || ''));
         } else {
           setAssignSpace(false);
@@ -74,10 +76,17 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
   // Al cambiar el espacio seleccionado, autocompletar el precio
   function handleSelectSpace(spaceId: string) {
     setSelectedSpaceId(spaceId);
+    setSelectedSpaceIds([spaceId]);
     const sp = availableSpaces.find((s) => s.id === spaceId);
     if (sp) {
       setMontoMensual(String(sp.precio_sugerido || ''));
     }
+  }
+
+  function toggleSpace(spaceId: string) {
+    setSelectedSpaceIds((current) => current.includes(spaceId)
+      ? current.filter((id) => id !== spaceId)
+      : [...current, spaceId]);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -96,8 +105,9 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
     }
 
     if (assignSpace) {
-      if (!selectedSpaceId) {
-        setError('Por favor selecciona una habitación vacía o desmarca la asignación.');
+      const hasSelectedSpaces = tipo === 'empresa' ? selectedSpaceIds.length > 0 : Boolean(selectedSpaceId);
+      if (!hasSelectedSpaces) {
+        setError('Por favor selecciona al menos un espacio o desmarca la asignación.');
         return;
       }
       if (!montoMensual || parseFloat(montoMensual) <= 0) {
@@ -119,7 +129,16 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
           email: email.trim() || null,
         },
         assignSpace
-          ? {
+          ? tipo === 'empresa'
+            ? { assignments: selectedSpaceIds.map((spaceId) => ({
+                espacio_id: spaceId,
+                monto_mensual: parseFloat(montoMensual),
+                dia_de_pago: diaDePago,
+                modalidad,
+                fecha_inicio: fechaInicio,
+                crearPrimerCobro: generarCobro,
+              })) }
+            : {
               espacio_id: selectedSpaceId,
               monto_mensual: parseFloat(montoMensual),
               dia_de_pago: diaDePago,
@@ -316,8 +335,22 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
                     </div>
                   ) : (
                     <>
-                      {/* Selector de habitación vacía */}
-                      <div>
+                      {/* Selector según tipo de inquilino */}
+                      {tipo === 'empresa' ? (
+                        <fieldset>
+                          <legend className="block text-xs font-bold text-gray-700 mb-1">
+                            Seleccionar Locales / Cuartos ({selectedSpaceIds.length} seleccionados)
+                          </legend>
+                          <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-200 bg-white p-2 space-y-1.5">
+                            {availableSpaces.map((sp) => (
+                              <label key={sp.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-gray-700 hover:bg-blue-50">
+                                <input type="checkbox" checked={selectedSpaceIds.includes(sp.id)} onChange={() => toggleSpace(sp.id)} className="h-4 w-4 rounded text-blue-600 focus:ring-blue-500" />
+                                <span>{sp.tipo === 'cuarto' ? 'Cuarto' : 'Local'} {sp.nombre} · {sp.piso} (S/ {sp.precio_sugerido})</span>
+                              </label>
+                            ))}
+                          </div>
+                        </fieldset>
+                      ) : <div>
                         <label className="block text-xs font-bold text-gray-700 mb-1">
                           Seleccionar Habitación Disponible ({availableSpaces.length} vacías)
                         </label>
@@ -335,7 +368,7 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
                             );
                           })}
                         </select>
-                      </div>
+                      </div>}
 
                       {/* Monto y Día de cobro */}
                       <div className="grid grid-cols-2 gap-2.5">
@@ -441,7 +474,7 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
                 <>
                   <Save size={18} />
                   {assignSpace && availableSpaces.length > 0
-                    ? 'Registrar Inquilino y Asignar Habitación'
+                    ? tipo === 'empresa' ? 'Registrar Empresa y Asignar Espacios' : 'Registrar Inquilino y Asignar Habitación'
                     : 'Registrar Inquilino'}
                 </>
               )}

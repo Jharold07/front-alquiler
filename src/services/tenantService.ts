@@ -43,6 +43,10 @@ export interface TenantContractAssignment {
   crearPrimerCobro?: boolean;
 }
 
+export interface TenantContractAssignmentInput {
+  assignments: TenantContractAssignment[];
+}
+
 export const tenantService = {
   /**
    * Obtiene todos los inquilinos con sus contratos, espacios y pagos asociados.
@@ -90,6 +94,12 @@ export const tenantService = {
     const rawList = (data || []) as unknown as Record<string, unknown>[];
     return rawList.map((t) => ({
       ...(t as unknown as DbInquilino),
+      space_ids: Array.isArray(t.contratos)
+        ? (t.contratos as Record<string, unknown>[]).map((c) => {
+            const space = Array.isArray(c.espacios) ? c.espacios[0] : c.espacios;
+            return (space as Record<string, unknown> | undefined)?.id;
+          }).filter((id): id is string => typeof id === 'string')
+        : [],
       contratos: Array.isArray(t.contratos)
         ? (t.contratos as Record<string, unknown>[]).map((c) => ({
             id: String(c.id || ''),
@@ -151,6 +161,13 @@ export const tenantService = {
     const raw = tenantData as unknown as Record<string, unknown>;
     const formattedTenant: TenantWithDetails = {
       ...(raw as unknown as DbInquilino),
+      space_ids: Array.isArray(raw.contratos)
+        ? (raw.contratos as Record<string, unknown>[]).flatMap((c) => {
+            const space = Array.isArray(c.espacios) ? c.espacios[0] : c.espacios;
+            const id = (space as Record<string, unknown> | undefined)?.id;
+            return typeof id === 'string' ? [id] : [];
+          })
+        : [],
       contratos: Array.isArray(raw.contratos)
         ? (raw.contratos as Record<string, unknown>[]).map((c) => ({
             id: String(c.id || ''),
@@ -211,8 +228,8 @@ export const tenantService = {
    */
   async createTenantWithContract(
     tenantPayload: NewTenantPayload,
-    assignment?: TenantContractAssignment
-  ): Promise<{ tenant: DbInquilino; contract?: DbContrato }> {
+    assignment?: TenantContractAssignment | TenantContractAssignmentInput
+  ): Promise<{ tenant: DbInquilino; contract?: DbContrato; contracts?: DbContrato[] }> {
     // 1. Crear inquilino
     const { data: tenant, error: tenantError } = await supabase
       .from('inquilinos')
@@ -234,37 +251,43 @@ export const tenantService = {
     let createdContract: DbContrato | undefined;
 
     // 2. Si se seleccionó una habitación vacía, crear contrato y ocupar habitación
-    if (assignment && assignment.espacio_id) {
+    const assignments = assignment
+      ? ('assignments' in assignment ? assignment.assignments : [assignment])
+      : [];
+    const createdContracts: DbContrato[] = [];
+    for (const item of assignments) {
+      if (!item.espacio_id) continue;
       const contractPayload: NewContractPayload = {
-        espacio_id: assignment.espacio_id,
+        espacio_id: item.espacio_id,
         inquilino_id: tenant.id,
-        monto_mensual: assignment.monto_mensual,
-        dia_de_pago: assignment.dia_de_pago,
-        modalidad: assignment.modalidad,
-        fecha_inicio: assignment.fecha_inicio,
+        monto_mensual: item.monto_mensual,
+        dia_de_pago: item.dia_de_pago,
+        modalidad: item.modalidad,
+        fecha_inicio: item.fecha_inicio,
       };
 
       createdContract = await contractService.createContract(contractPayload);
+      createdContracts.push(createdContract);
 
       // 3. Crear cobro inicial si está solicitado
-      if (assignment.crearPrimerCobro && createdContract) {
+      if (item.crearPrimerCobro && createdContract) {
         const meses = [
           'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
           'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
         ];
-        const fechaObj = new Date(assignment.fecha_inicio);
+        const fechaObj = new Date(item.fecha_inicio);
         const mesNombre = `${meses[fechaObj.getMonth()]} ${fechaObj.getFullYear()}`;
 
         // Calcular fecha de vencimiento según día de pago
         const ano = fechaObj.getFullYear();
         const mesIdx = fechaObj.getMonth();
-        const diaPago = Math.min(28, assignment.dia_de_pago);
+        const diaPago = Math.min(28, item.dia_de_pago);
         const fechaVenc = `${ano}-${String(mesIdx + 1).padStart(2, '0')}-${String(diaPago).padStart(2, '0')}`;
 
         await supabase.from('pagos').insert({
           contrato_id: createdContract.id,
           mes_correspondiente: mesNombre,
-          monto: assignment.monto_mensual,
+          monto: item.monto_mensual,
           fecha_vencimiento: fechaVenc,
           estado: 'pendiente',
           observacion: 'Cobro generado al registrar contrato',
@@ -272,6 +295,6 @@ export const tenantService = {
       }
     }
 
-    return { tenant: tenant as DbInquilino, contract: createdContract };
+    return { tenant: tenant as DbInquilino, contract: createdContracts[0], contracts: createdContracts };
   },
 };

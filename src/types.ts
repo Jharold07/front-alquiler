@@ -31,6 +31,8 @@ export interface DbInquilino {
   documento_id: string;
   telefono: string;
   email: string | null;
+  /** IDs de espacios asignados, derivados de sus contratos cuando corresponda. */
+  space_ids?: string[];
   creado_en?: string;
 }
 
@@ -78,6 +80,7 @@ export interface AlertItem {
     document: string;
     type?: TenantType;
     email?: string | null;
+    spaceNumbers?: string[];
   };
   space: {
     id: string;
