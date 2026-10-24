@@ -9,24 +9,25 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react';
-import type { SpaceType, SpaceStatus } from '../../types';
+import type { SpaceType, SpaceStatus, DbEspacio } from '../../types';
 import { spaceService } from '../../services/spaceService';
 
 interface Props {
   defaultType: SpaceType;
+  space?: DbEspacio;
   onClose: () => void;
   onCreated: () => void;
 }
 
 const commonFloors = ['PLANTA BAJA', 'PISO 1', 'PISO 2', 'PISO 3', 'PISO 4', 'PISO 5'];
 
-export function CreateSpaceModal({ defaultType, onClose, onCreated }: Props) {
-  const [nombre, setNombre] = useState('');
-  const [tipo, setTipo] = useState<SpaceType>(defaultType);
-  const [piso, setPiso] = useState(defaultType === 'local' ? 'PLANTA BAJA' : 'PISO 1');
-  const [rubro, setRubro] = useState(defaultType === 'local' ? 'Comercial' : 'Habitación');
-  const [precioSugerido, setPrecioSugerido] = useState(defaultType === 'local' ? '900' : '380');
-  const [estado, setEstado] = useState<SpaceStatus>('disponible');
+export function CreateSpaceModal({ defaultType, space, onClose, onCreated }: Props) {
+  const [nombre, setNombre] = useState(space?.nombre || '');
+  const [tipo, setTipo] = useState<SpaceType>(space?.tipo || defaultType);
+  const [piso, setPiso] = useState(space?.piso || (defaultType === 'local' ? 'PLANTA BAJA' : 'PISO 1'));
+  const [rubro, setRubro] = useState(space?.rubro || (defaultType === 'local' ? 'Comercial' : 'Habitación'));
+  const [precioSugerido, setPrecioSugerido] = useState(String(space?.precio_sugerido ?? (defaultType === 'local' ? '900' : '380')));
+  const [estado, setEstado] = useState<SpaceStatus>(space?.estado || 'disponible');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,18 +46,20 @@ export function CreateSpaceModal({ defaultType, onClose, onCreated }: Props) {
     setError(null);
 
     try {
-      await spaceService.createSpace({
+      const payload = {
         nombre,
         tipo,
         piso,
         rubro: rubro.trim() || null,
         precio_sugerido: parseFloat(precioSugerido) || 0,
         estado,
-      });
+      };
+      if (space) await spaceService.updateSpace(space.id, payload);
+      else await spaceService.createSpace(payload);
 
       onCreated();
     } catch (err: unknown) {
-      console.error('Error al crear espacio:', err);
+      console.error('Error al guardar espacio:', err);
       const msg = err instanceof Error ? err.message : 'Error al guardar el espacio.';
       setError(msg);
     } finally {
@@ -74,7 +77,7 @@ export function CreateSpaceModal({ defaultType, onClose, onCreated }: Props) {
         <div className="sticky top-0 bg-white pt-3 pb-2 rounded-t-3xl z-10 border-b border-gray-100">
           <div className="mx-auto h-1.5 w-10 rounded-full bg-gray-300" />
           <div className="flex items-center justify-between px-5 pt-3">
-            <h2 className="text-lg font-bold text-gray-900">Registrar Espacio</h2>
+            <h2 className="text-lg font-bold text-gray-900">{space ? 'Editar Espacio' : 'Registrar Espacio'}</h2>
             <button
               onClick={onClose}
               className="h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition"
@@ -223,7 +226,7 @@ export function CreateSpaceModal({ defaultType, onClose, onCreated }: Props) {
           {/* Estado inicial */}
           <div>
             <label className="block text-xs font-bold text-gray-700 mb-1.5">
-              Estado Inicial
+              Estado
             </label>
             <div className="grid grid-cols-3 gap-2">
               {(
@@ -261,7 +264,7 @@ export function CreateSpaceModal({ defaultType, onClose, onCreated }: Props) {
                 </>
               ) : (
                 <>
-                  <Save size={18} /> Registrar Espacio
+                  <Save size={18} /> {space ? 'Guardar cambios' : 'Registrar Espacio'}
                 </>
               )}
             </button>

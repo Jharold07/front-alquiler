@@ -18,6 +18,13 @@ export const statusConfig: Record<
     text: 'text-amber-700',
     dot: 'bg-amber-500',
   },
+  abonado: {
+    label: 'Pago parcial · saldo pendiente',
+    bg: 'bg-purple-50',
+    border: 'border-purple-200',
+    text: 'text-purple-700',
+    dot: 'bg-purple-500',
+  },
   aldia: {
     label: 'Al día',
     bg: 'bg-green-50',

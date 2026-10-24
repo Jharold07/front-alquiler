@@ -8,11 +8,14 @@ import {
   Loader2,
   UserMinus,
   CheckCircle2,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import type { SpaceType, SpaceStatus } from './types';
 import { spaceService, type SpaceWithDetails } from './services/spaceService';
 import { CreateSpaceModal } from './components/modals/CreateSpaceModal';
 import { TerminateContractModal } from './components/modals/TerminateContractModal';
+import { ConfirmDeleteModal } from './components/modals/ConfirmDeleteModal';
 
 interface Props {
   onOpenTenant: (tenantId: string) => void;
@@ -53,6 +56,8 @@ export function Spaces({ onOpenTenant }: Props) {
   const [spaces, setSpaces] = useState<SpaceWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingSpace, setEditingSpace] = useState<SpaceWithDetails | null>(null);
+  const [deletingSpace, setDeletingSpace] = useState<SpaceWithDetails | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Estado para dar de baja contrato desde la vista de espacios
@@ -188,6 +193,8 @@ export function Spaces({ onOpenTenant }: Props) {
                         activeContractId={activeContract?.id}
                         spaceTitle={spaceTitle}
                         onOpenTenant={onOpenTenant}
+                        onEdit={() => setEditingSpace(space)}
+                        onDelete={() => setDeletingSpace(space)}
                         onLiberarSpace={() => {
                           if (activeContract && inquilino) {
                             setTerminateTarget({
@@ -219,6 +226,8 @@ export function Spaces({ onOpenTenant }: Props) {
           }}
         />
       )}
+      {editingSpace && <CreateSpaceModal defaultType={editingSpace.tipo} space={editingSpace} onClose={() => setEditingSpace(null)} onCreated={() => { setEditingSpace(null); setSuccessMessage('Espacio actualizado correctamente.'); fetchSpaces(); }} />}
+      {deletingSpace && <ConfirmDeleteModal recordLabel="el espacio" recordName={`${deletingSpace.tipo === 'cuarto' ? 'Cuarto' : 'Local'} ${deletingSpace.nombre} · ${deletingSpace.piso}`} onClose={() => setDeletingSpace(null)} onDelete={() => spaceService.deleteSpace(deletingSpace.id)} onDeleted={() => { setDeletingSpace(null); setSuccessMessage('Espacio y registros relacionados eliminados.'); fetchSpaces(); }} />}
 
       {terminateTarget && (
         <TerminateContractModal
@@ -244,6 +253,8 @@ function SpaceCard({
   activeContractId,
   spaceTitle,
   onOpenTenant,
+  onEdit,
+  onDelete,
   onLiberarSpace,
 }: {
   space: SpaceWithDetails;
@@ -256,6 +267,8 @@ function SpaceCard({
   activeContractId?: string;
   spaceTitle: string;
   onOpenTenant: (id: string) => void;
+  onEdit: () => void;
+  onDelete: () => void;
   onLiberarSpace: () => void;
 }) {
   const currentStatus = space.estado || 'disponible';
@@ -276,12 +289,15 @@ function SpaceCard({
             </p>
           </div>
         </div>
+        <div className="flex items-center gap-2">
+        <button type="button" onClick={onEdit} aria-label={`Editar ${spaceTitle}`} className="rounded-lg border border-gray-200 p-2 text-blue-700 hover:bg-blue-50"><Pencil size={15}/></button>
         <span
           className={`flex items-center gap-1.5 text-xs font-semibold ${style.text} ${style.bg} px-2.5 py-1 rounded-full`}
         >
           <span className={`h-2 w-2 rounded-full ${style.dot}`} />
           {style.label}
         </span>
+        </div>
       </div>
 
       <div className="flex items-center gap-1.5 text-sm text-gray-600 mb-3">
@@ -325,6 +341,7 @@ function SpaceCard({
           <p className="text-xs font-semibold text-green-700">✓ Espacio libre y disponible para alquiler</p>
         </div>
       )}
+      <button type="button" onClick={onDelete} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 py-2.5 text-xs font-bold text-red-700 hover:bg-red-50"><Trash2 size={14}/>Eliminar espacio</button>
     </div>
   );
 }

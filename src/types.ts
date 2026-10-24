@@ -10,7 +10,7 @@ export type SpaceStatus = 'disponible' | 'ocupado' | 'mantenimiento' | 'pendient
 
 export type PaymentStatus = 'pendiente' | 'pagado' | 'vencido';
 
-export type AlertStatus = 'vencido' | 'proximo' | 'aldia';
+export type AlertStatus = 'vencido' | 'proximo' | 'abonado' | 'aldia';
 
 // ================= Supabase Database Models =================
 export interface DbEspacio {
@@ -81,6 +81,7 @@ export interface AlertItem {
     type?: TenantType;
     email?: string | null;
     spaceNumbers?: string[];
+    assignedSpaces?: { id: string; number: string; floor: string; type?: SpaceType }[];
   };
   space: {
     id: string;
@@ -92,10 +93,15 @@ export interface AlertItem {
   daysLate?: number;
   daysUntilDue?: number;
   amount: number;
+  paidAmount?: number;
   modality: PaymentModality;
   month?: string;
   dueDate?: string;
   paymentDate?: string | null;
   voucherUrl?: string | null;
   paymentId?: string;
+  paymentIds?: string[];
+  contractIds?: string[];
+  spaces?: { id: string; number: string; floor: string; type?: SpaceType }[];
+  paymentAmounts?: { id: string; amount: number; contractId?: string; dueDate?: string; paidAmount?: number }[];
 }

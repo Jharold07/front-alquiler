@@ -6,16 +6,10 @@ import {
   FileText,
   Phone,
   Mail,
-  Building2,
-  Store,
-  DollarSign,
-  Calendar,
   Hash,
-  Repeat,
   Save,
   Loader2,
   AlertCircle,
-  CheckCircle2,
   Sparkles,
 } from 'lucide-react';
 import type { TenantType, DbEspacio, PaymentModality } from '../../types';
@@ -42,6 +36,8 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
   const [selectedSpaceId, setSelectedSpaceId] = useState<string>('');
   const [selectedSpaceIds, setSelectedSpaceIds] = useState<string[]>([]);
   const [montoMensual, setMontoMensual] = useState<string>('');
+  const [priceMode, setPriceMode] = useState<'global' | 'individual'>('global');
+  const [spacePrices, setSpacePrices] = useState<Record<string, string>>({});
   const [diaDePago, setDiaDePago] = useState<number>(5);
   const [modalidad, setModalidad] = useState<PaymentModality>('adelantado');
   const [fechaInicio, setFechaInicio] = useState(new Date().toISOString().split('T')[0]);
@@ -84,9 +80,21 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
   }
 
   function toggleSpace(spaceId: string) {
-    setSelectedSpaceIds((current) => current.includes(spaceId)
-      ? current.filter((id) => id !== spaceId)
-      : [...current, spaceId]);
+    setSelectedSpaceIds((current) => {
+      const exists = current.includes(spaceId);
+      if (!exists) {
+        const space = availableSpaces.find((item) => item.id === spaceId);
+        setSpacePrices((prices) => ({ ...prices, [spaceId]: prices[spaceId] || String(space?.precio_sugerido || '') }));
+      }
+      return exists ? current.filter((id) => id !== spaceId) : [...current, spaceId];
+    });
+  }
+
+  function getGlobalSpacePrice(index: number): number {
+    const totalCents = Math.round((parseFloat(montoMensual) || 0) * 100);
+    const baseCents = Math.floor(totalCents / selectedSpaceIds.length);
+    const remainderCents = totalCents % selectedSpaceIds.length;
+    return (baseCents + (index < remainderCents ? 1 : 0)) / 100;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -110,7 +118,9 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
         setError('Por favor selecciona al menos un espacio o desmarca la asignación.');
         return;
       }
-      if (!montoMensual || parseFloat(montoMensual) <= 0) {
+      const invalidIndividualPrice = tipo === 'empresa' && priceMode === 'individual'
+        && selectedSpaceIds.some((id) => !spacePrices[id] || parseFloat(spacePrices[id]) <= 0);
+      if (invalidIndividualPrice || (tipo === 'empresa' && priceMode === 'global' && (!montoMensual || parseFloat(montoMensual) <= 0)) || (tipo === 'persona' && (!montoMensual || parseFloat(montoMensual) <= 0))) {
         setError('Por favor indica un monto mensual de alquiler válido.');
         return;
       }
@@ -130,9 +140,11 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
         },
         assignSpace
           ? tipo === 'empresa'
-            ? { assignments: selectedSpaceIds.map((spaceId) => ({
+            ? { assignments: selectedSpaceIds.map((spaceId, index) => ({
                 espacio_id: spaceId,
-                monto_mensual: parseFloat(montoMensual),
+                monto_mensual: priceMode === 'individual'
+                  ? parseFloat(spacePrices[spaceId])
+                  : getGlobalSpacePrice(index),
                 dia_de_pago: diaDePago,
                 modalidad,
                 fecha_inicio: fechaInicio,
@@ -370,7 +382,29 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
                         </select>
                       </div>}
 
-                      {/* Monto y Día de cobro */}
+                      {tipo === 'empresa' && (
+                        <div>
+                          <p className="block text-xs font-bold text-gray-700 mb-1.5">Modo de precio</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button type="button" onClick={() => setPriceMode('global')} className={`rounded-xl border px-2 py-2 text-[11px] font-bold ${priceMode === 'global' ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600'}`}>Precio Total Global</button>
+                            <button type="button" onClick={() => setPriceMode('individual')} className={`rounded-xl border px-2 py-2 text-[11px] font-bold ${priceMode === 'individual' ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600'}`}>Precio por Habitación</button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Precio global / por espacio */}
+                      {tipo === 'empresa' && priceMode === 'individual' ? (
+                        <div className="space-y-2">
+                          {selectedSpaceIds.map((spaceId) => {
+                            const space = availableSpaces.find((item) => item.id === spaceId);
+                            return <label key={spaceId} className="grid grid-cols-[1fr_120px] items-center gap-2 text-xs font-semibold text-gray-700">
+                              <span>{space?.tipo === 'local' ? 'Local' : 'Cuarto'} {space?.nombre}</span>
+                              <span className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400">S/</span><input type="number" min="0.01" step="0.01" value={spacePrices[spaceId] || ''} onChange={(e) => setSpacePrices((prices) => ({ ...prices, [spaceId]: e.target.value }))} className="w-full rounded-lg border border-gray-200 pl-7 pr-2 py-2 text-xs" /></span>
+                            </label>;
+                          })}
+                          <p className="text-right text-xs font-bold text-blue-700">Total mensual: S/ {selectedSpaceIds.reduce((sum, id) => sum + (parseFloat(spacePrices[id]) || 0), 0).toLocaleString('es-PE')}</p>
+                        </div>
+                      ) : (
                       <div className="grid grid-cols-2 gap-2.5">
                         <div>
                           <label className="block text-xs font-bold text-gray-700 mb-1">
@@ -410,6 +444,7 @@ export function CreateTenantModal({ onClose, onCreated }: Props) {
                           </div>
                         </div>
                       </div>
+                      )}
 
                       {/* Modalidad y Fecha de inicio */}
                       <div className="grid grid-cols-2 gap-2.5">

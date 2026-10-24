@@ -48,6 +48,39 @@ export interface TenantContractAssignmentInput {
 }
 
 export const tenantService = {
+  async deleteTenant(tenantId: string): Promise<void> {
+    const { data: contracts, error: contractsError } = await supabase
+      .from('contratos')
+      .select('id, espacio_id, activo')
+      .eq('inquilino_id', tenantId);
+    if (contractsError) throw contractsError;
+
+    const contractIds = (contracts || []).map((contract) => contract.id);
+    const activeSpaceIds = (contracts || []).filter((contract) => contract.activo).map((contract) => contract.espacio_id);
+    if (contractIds.length) {
+      const { error: paymentsError } = await supabase.from('pagos').delete().in('contrato_id', contractIds);
+      if (paymentsError) throw paymentsError;
+      if (activeSpaceIds.length) {
+        const { error: spacesError } = await supabase.from('espacios').update({ estado: 'disponible' }).in('id', activeSpaceIds);
+        if (spacesError) throw spacesError;
+      }
+      const { error: deleteContractsError } = await supabase.from('contratos').delete().eq('inquilino_id', tenantId);
+      if (deleteContractsError) throw deleteContractsError;
+    }
+
+    const { error } = await supabase.from('inquilinos').delete().eq('id', tenantId);
+    if (error) throw error;
+  },
+  async updateTenant(tenantId: string, payload: Pick<NewTenantPayload, 'nombre_razon_social' | 'tipo' | 'documento_id' | 'telefono' | 'email'>): Promise<void> {
+    const { error } = await supabase.from('inquilinos').update({
+      nombre_razon_social: payload.nombre_razon_social.trim(),
+      tipo: payload.tipo,
+      documento_id: payload.documento_id.trim(),
+      telefono: payload.telefono.trim(),
+      email: payload.email?.trim() || null,
+    }).eq('id', tenantId);
+    if (error) throw error;
+  },
   /**
    * Obtiene todos los inquilinos con sus contratos, espacios y pagos asociados.
    */
@@ -109,8 +142,8 @@ export const tenantService = {
             modalidad: String(c.modalidad || 'adelantado'),
             fecha_inicio: String(c.fecha_inicio || ''),
             fecha_fin: c.fecha_fin ? String(c.fecha_fin) : null,
-            espacios: Array.isArray(c.espacios) ? c.espacios[0] : (c.espacios as any),
-            pagos: Array.isArray(c.pagos) ? (c.pagos as any[]) : [],
+            espacios: Array.isArray(c.espacios) ? c.espacios[0] as NonNullable<TenantWithDetails['contratos']>[number]['espacios'] : c.espacios as unknown as NonNullable<TenantWithDetails['contratos']>[number]['espacios'],
+            pagos: Array.isArray(c.pagos) ? c.pagos as NonNullable<TenantWithDetails['contratos']>[number]['pagos'] : [],
           }))
         : [],
     }));
@@ -177,7 +210,7 @@ export const tenantService = {
             modalidad: String(c.modalidad || 'adelantado'),
             fecha_inicio: String(c.fecha_inicio || ''),
             fecha_fin: c.fecha_fin ? String(c.fecha_fin) : null,
-            espacios: Array.isArray(c.espacios) ? c.espacios[0] : (c.espacios as any),
+            espacios: Array.isArray(c.espacios) ? c.espacios[0] as NonNullable<TenantWithDetails['contratos']>[number]['espacios'] : c.espacios as unknown as NonNullable<TenantWithDetails['contratos']>[number]['espacios'],
           }))
         : [],
     };

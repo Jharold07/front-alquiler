@@ -59,7 +59,7 @@ export function Tenants({ onOpenTenant }: Props) {
           </button>
         </div>
         <p className="text-blue-100 text-sm mb-4">
-          {tenants.length} inquilinos registrados en Supabase
+          {tenants.length} inquilinos registrados
         </p>
 
         {/* Search */}
@@ -100,11 +100,10 @@ export function Tenants({ onOpenTenant }: Props) {
             <button
               key={f.id}
               onClick={() => setFilter(f.id)}
-              className={`rounded-full px-4 py-2 text-sm font-semibold whitespace-nowrap transition ${
-                filter === f.id
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
+              className={`rounded-full px-4 py-2 text-sm font-semibold whitespace-nowrap transition ${filter === f.id
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
             >
               {f.label}
             </button>
@@ -114,7 +113,7 @@ export function Tenants({ onOpenTenant }: Props) {
         {loading ? (
           <div className="py-16 flex flex-col items-center justify-center text-gray-400 gap-3">
             <Loader2 size={32} className="animate-spin text-blue-600" />
-            <p className="text-sm font-medium">Cargando inquilinos desde Supabase...</p>
+            <p className="text-sm font-medium">Cargando inquilinos ...</p>
           </div>
         ) : (
           <div className="space-y-3">

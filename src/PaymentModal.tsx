@@ -63,6 +63,10 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
       setErrorMessage('Por favor ingresa un monto válido.');
       return;
     }
+    if (parseFloat(amount) > alert.amount + 0.009) {
+      setErrorMessage('El monto abonado no puede superar el saldo pendiente.');
+      return;
+    }
 
     setIsSaving(true);
     setErrorMessage(null);
@@ -105,23 +109,61 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
       const targetPaymentId = alert.id || alert.paymentId;
 
       // 2. Guardar en la tabla 'pagos'
-      if (targetPaymentId) {
-        // Actualizar pago existente (que estaba pendiente o vencido)
-        const { error: updateError } = await supabase
-          .from('pagos')
-          .update({
-            monto: parsedAmount,
-            metodo: method,
-            fecha_pago: today,
-            estado: 'pagado',
-            comprobante_url: voucherUrl,
-            observacion: observations.trim() || null,
-          })
-          .eq('id', targetPaymentId);
+      const obligations = alert.paymentAmounts?.length
+        ? alert.paymentAmounts
+        : targetPaymentId
+          ? [{ id: targetPaymentId, amount: alert.amount, contractId: alert.contratoId, dueDate: alert.dueDate }]
+          : [];
+      if (obligations.length > 0) {
+        let remainingToApply = Math.round(parsedAmount * 100) / 100;
+        for (const obligation of obligations) {
+          if (remainingToApply <= 0) break;
+          const applied = Math.min(obligation.amount, remainingToApply);
+          const balance = Math.round((obligation.amount - applied) * 100) / 100;
+          if (balance <= 0.009) {
+            const totalPaid = Math.round(((obligation.paidAmount || 0) + applied) * 100) / 100;
+            const { error: updateError } = await supabase.from('pagos').update({
+              monto: totalPaid,
+              metodo: method,
+              fecha_pago: today,
+              estado: 'pagado',
+              comprobante_url: voucherUrl,
+              observacion: [`ABONO ACUMULADO: S/ ${totalPaid.toFixed(2)}`, observations.trim()].filter(Boolean).join(' · '),
+            }).eq('id', obligation.id);
+            if (updateError) throw updateError;
+          } else {
+            const accumulated = Math.round(((obligation.paidAmount || 0) + applied) * 100) / 100;
+            const note = [`ABONO ACUMULADO: S/ ${accumulated.toFixed(2)}`, observations.trim()].filter(Boolean).join(' · ');
+            const { error: balanceError } = await supabase.from('pagos').update({
+              monto: balance,
+              fecha_pago: null,
+              estado: 'pendiente',
+              observacion: note,
+            }).eq('id', obligation.id);
+            if (balanceError) throw balanceError;
 
-        if (updateError) {
-          throw updateError;
+            const { error: transactionError } = await supabase.from('pagos').insert({
+              contrato_id: obligation.contractId || alert.contratoId,
+              mes_correspondiente: alert.month || getCurrentMonthLabel(),
+              monto: applied,
+              fecha_vencimiento: obligation.dueDate || alert.dueDate || today,
+              fecha_pago: today,
+              metodo: method,
+              estado: 'pagado',
+              comprobante_url: voucherUrl,
+              observacion: `ABONO_TRANSACCION: obligación ${obligation.id}${observations.trim() ? ` · ${observations.trim()}` : ''}`,
+            });
+            if (transactionError?.code === '23505') {
+              const fallbackNote = `${note} · ABONO TRANSACCION: S/ ${applied.toFixed(2)}${observations.trim() ? ` · ${observations.trim()}` : ''}`;
+              const { error: fallbackError } = await supabase.from('pagos').update({ observacion: fallbackNote }).eq('id', obligation.id);
+              if (fallbackError) throw fallbackError;
+            } else if (transactionError) {
+              throw transactionError;
+            }
+          }
+          remainingToApply = Math.round((remainingToApply - applied) * 100) / 100;
         }
+        if (remainingToApply > 0.009) throw new Error('No se pudo aplicar el monto completo al saldo seleccionado.');
       } else if (alert.contratoId) {
         // Insertar nuevo registro de pago asociado al contrato
         const { error: insertError } = await supabase
@@ -144,7 +186,13 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
       }
 
       // Si la modalidad cambió y tenemos contratoId, actualizar contrato
-      if (alert.contratoId && modality !== alert.modality) {
+      if (alert.contractIds?.length && modality !== alert.modality) {
+        const { error: modalityError } = await supabase
+          .from('contratos')
+          .update({ modalidad: modality })
+          .in('id', alert.contractIds);
+        if (modalityError) throw modalityError;
+      } else if (alert.contratoId && modality !== alert.modality) {
         await supabase
           .from('contratos')
           .update({ modalidad: modality })
@@ -164,7 +212,9 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
     }
   }
 
-  const spaceLabel = `${alert.space.floor} · ${alert.space.number}`;
+  const spaceLabel = alert.spaces && alert.spaces.length > 1
+    ? alert.spaces.map((space) => `${space.floor} · ${space.number}`).join(', ')
+    : `${alert.space.floor} · ${alert.space.number}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
@@ -209,7 +259,7 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Espacio</span>
+                <span className="text-gray-500">{alert.spaces && alert.spaces.length > 1 ? 'Espacios' : 'Espacio'}</span>
                 <span className="font-semibold text-gray-900">{spaceLabel}</span>
               </div>
               <div className="flex justify-between text-sm">
@@ -254,7 +304,10 @@ export function PaymentModal({ alert, onClose, onSave }: Props) {
           </p>
 
           {/* Amount */}
-          <p className="text-sm font-semibold text-gray-900 mb-2">Monto del pago</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-semibold text-gray-900">Monto abonado</p>
+            <span className="text-xs text-gray-500">Saldo: S/ {alert.amount.toLocaleString('es-PE')}</span>
+          </div>
           <div className="relative mb-5">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium text-lg">
               S/

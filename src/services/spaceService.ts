@@ -16,6 +16,7 @@ export interface SpaceWithDetails extends DbEspacio {
     };
   }[];
 }
+type SpaceTenant = NonNullable<SpaceWithDetails['contratos']>[number]['inquilinos'];
 
 export interface NewSpacePayload {
   nombre: string;
@@ -27,6 +28,22 @@ export interface NewSpacePayload {
 }
 
 export const spaceService = {
+  async deleteSpace(spaceId: string): Promise<void> {
+    const { data: contracts, error: contractsError } = await supabase
+      .from('contratos')
+      .select('id')
+      .eq('espacio_id', spaceId);
+    if (contractsError) throw contractsError;
+    const contractIds = (contracts || []).map((contract) => contract.id);
+    if (contractIds.length) {
+      const { error: paymentsError } = await supabase.from('pagos').delete().in('contrato_id', contractIds);
+      if (paymentsError) throw paymentsError;
+      const { error: deleteContractsError } = await supabase.from('contratos').delete().eq('espacio_id', spaceId);
+      if (deleteContractsError) throw deleteContractsError;
+    }
+    const { error } = await supabase.from('espacios').delete().eq('id', spaceId);
+    if (error) throw error;
+  },
   /**
    * Obtiene todos los espacios con sus contratos e inquilinos relacionados.
    */
@@ -74,7 +91,7 @@ export const spaceService = {
             dia_de_pago: Number(c.dia_de_pago || 1),
             modalidad: String(c.modalidad || 'adelantado'),
             activo: Boolean(c.activo),
-            inquilinos: Array.isArray(c.inquilinos) ? c.inquilinos[0] : (c.inquilinos as any),
+            inquilinos: Array.isArray(c.inquilinos) ? c.inquilinos[0] as SpaceTenant : c.inquilinos as unknown as SpaceTenant,
           }))
         : [],
     }));
@@ -122,6 +139,18 @@ export const spaceService = {
     }
 
     return data as DbEspacio;
+  },
+
+  async updateSpace(spaceId: string, payload: NewSpacePayload): Promise<void> {
+    const { error } = await supabase.from('espacios').update({
+      nombre: payload.nombre.trim(),
+      tipo: payload.tipo,
+      piso: payload.piso.trim(),
+      rubro: payload.rubro?.trim() || null,
+      precio_sugerido: payload.precio_sugerido,
+      estado: payload.estado,
+    }).eq('id', spaceId);
+    if (error) throw error;
   },
 
   /**

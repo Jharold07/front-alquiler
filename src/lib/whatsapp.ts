@@ -17,7 +17,9 @@ export function formatWhatsAppPhone(phone: string): string {
  */
 export function buildPaymentReminderMessage(alert: AlertItem): string {
   const nombre = alert.tenant.name;
-  const espacio = `${alert.space.floor} - ${alert.space.number}`;
+  const espacio = alert.spaces && alert.spaces.length > 1
+    ? alert.spaces.map((space) => `${space.floor} - ${space.number}`).join(', ')
+    : `${alert.space.floor} - ${alert.space.number}`;
   const mes = alert.month || 'el mes en curso';
   const monto = alert.amount.toLocaleString('es-PE');
   const vencimiento = alert.dueDate || 'fecha indicada';

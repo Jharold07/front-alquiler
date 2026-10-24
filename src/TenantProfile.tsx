@@ -18,24 +18,33 @@ import {
   Image,
   UserMinus,
   CheckCircle2,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import type { DbPago } from './types';
 import { modalityLabel } from './data';
 import { formatWhatsAppPhone } from './lib/whatsapp';
 import { tenantService, type TenantWithDetails } from './services/tenantService';
 import { TerminateContractModal } from './components/modals/TerminateContractModal';
+import { NewContractModal } from './components/modals/NewContractModal';
+import { EditTenantModal } from './components/modals/EditTenantModal';
+import { ConfirmDeleteModal } from './components/modals/ConfirmDeleteModal';
 
 interface Props {
   tenantId: string;
   onBack: () => void;
+  onDeleted?: () => void;
 }
 
-export function TenantProfile({ tenantId, onBack }: Props) {
+export function TenantProfile({ tenantId, onBack, onDeleted }: Props) {
   const [tenant, setTenant] = useState<TenantWithDetails | null>(null);
   const [payments, setPayments] = useState<DbPago[]>([]);
   const [loading, setLoading] = useState(true);
   const [openHistory, setOpenHistory] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showNewContract, setShowNewContract] = useState(false);
+  const [showEditTenant, setShowEditTenant] = useState(false);
+  const [showDeleteTenant, setShowDeleteTenant] = useState(false);
 
   // Estado para dar de baja contrato
   const [terminateTarget, setTerminateTarget] = useState<{
@@ -168,6 +177,12 @@ export function TenantProfile({ tenantId, onBack }: Props) {
             <InfoRow icon={<MailIcon size={16} />} label="Correo" value={tenant.email} />
           )}
         </Section>
+
+        <div className="grid grid-cols-2 gap-3">
+          {activeContracts.length === 0 && <button onClick={() => setShowNewContract(true)} className="rounded-2xl bg-blue-600 px-3 py-3 text-sm font-bold text-white shadow hover:bg-blue-700">Reactivar · Nuevo Contrato</button>}
+          <button onClick={() => setShowEditTenant(true)} className={`${activeContracts.length > 0 ? 'col-span-2' : ''} flex items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-white px-3 py-3 text-sm font-bold text-blue-700 shadow-sm hover:bg-blue-50`}><Pencil size={16}/>Editar Inquilino</button>
+        </div>
+        <button onClick={() => setShowDeleteTenant(true)} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 py-3 text-sm font-bold text-red-700 hover:bg-red-100"><Trash2 size={16}/>Eliminar Inquilino</button>
 
         {/* Active contract(s) */}
         <Section title="Contrato(s) activo(s)">
@@ -362,6 +377,9 @@ export function TenantProfile({ tenantId, onBack }: Props) {
           }}
         />
       )}
+      {showNewContract && <NewContractModal tenantId={tenant.id} tenantType={tenant.tipo} onClose={() => setShowNewContract(false)} onCreated={() => { setShowNewContract(false); setSuccessMessage('Contrato creado y espacios reactivados correctamente.'); fetchTenantData(); }} />}
+      {showEditTenant && <EditTenantModal tenant={tenant} onClose={() => setShowEditTenant(false)} onSaved={() => { setShowEditTenant(false); setSuccessMessage('Datos del inquilino actualizados correctamente.'); fetchTenantData(); }} />}
+      {showDeleteTenant && <ConfirmDeleteModal recordLabel="al inquilino" recordName={tenant.nombre_razon_social} onClose={() => setShowDeleteTenant(false)} onDelete={() => tenantService.deleteTenant(tenant.id)} onDeleted={onDeleted || onBack} />}
     </div>
   );
 }

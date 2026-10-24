@@ -71,7 +71,7 @@ export function Dashboard({ onOpenTenant }: Props) {
               documento_id,
               telefono,
               email,
-              contratos (espacios (id, nombre))
+              contratos (activo, espacios (id, nombre, piso, tipo))
             )
           )
         `)
@@ -95,6 +95,7 @@ export function Dashboard({ onOpenTenant }: Props) {
         const items: AlertItem[] = [];
 
         for (const p of pagosData) {
+          if (p.observacion?.startsWith('ABONO_TRANSACCION:')) continue;
           // Tipado del join
           const contrato = Array.isArray(p.contratos) ? p.contratos[0] : p.contratos;
           if (!contrato) continue;
@@ -123,6 +124,8 @@ export function Dashboard({ onOpenTenant }: Props) {
 
           if (p.estado === 'pagado' || p.fecha_pago) {
             status = 'aldia';
+          } else if (p.observacion?.includes('ABONO ACUMULADO:')) {
+            status = 'abonado';
           } else if (p.estado === 'vencido' || diffDays < 0) {
             status = 'vencido';
             daysLate = diffDays < 0 ? Math.abs(diffDays) : (p.estado === 'vencido' ? 5 : 1);
@@ -143,10 +146,19 @@ export function Dashboard({ onOpenTenant }: Props) {
               type: inquilino.tipo,
               email: inquilino.email,
               spaceNumbers: Array.isArray(inquilino.contratos)
-                ? inquilino.contratos.flatMap((c: { espacios?: { nombre?: string } | { nombre?: string }[] | null }) => {
+                ? inquilino.contratos.flatMap((c: { activo?: boolean; espacios?: { nombre?: string } | { nombre?: string }[] | null }) => {
+                    if (c.activo === false) return [];
                     const spaces = Array.isArray(c.espacios) ? c.espacios : c.espacios ? [c.espacios] : [];
                     return spaces.map((space) => space.nombre).filter((name): name is string => Boolean(name));
                   })
+                : [],
+              assignedSpaces: Array.isArray(inquilino.contratos)
+                ? [...new Map(inquilino.contratos.flatMap((c: { activo?: boolean; espacios?: { id?: string; nombre?: string; piso?: string; tipo?: 'cuarto' | 'local' } | { id?: string; nombre?: string; piso?: string; tipo?: 'cuarto' | 'local' }[] | null }) => {
+                    if (c.activo === false) return [];
+                    const values = Array.isArray(c.espacios) ? c.espacios : c.espacios ? [c.espacios] : [];
+                    return values.filter((space): space is { id: string; nombre: string; piso: string; tipo?: 'cuarto' | 'local' } => Boolean(space.id && space.nombre && space.piso))
+                      .map((space) => [space.id, { id: space.id, number: space.nombre, floor: space.piso, type: space.tipo }] as const);
+                  })).values()]
                 : [],
             },
             space: {
@@ -159,15 +171,65 @@ export function Dashboard({ onOpenTenant }: Props) {
             daysLate,
             daysUntilDue,
             amount: p.monto,
+            paidAmount: Number(p.observacion?.match(/ABONO ACUMULADO: S\/\s*([\d.]+)/)?.[1] || 0),
             modality: contrato.modalidad || 'adelantado',
             month: p.mes_correspondiente,
             dueDate: p.fecha_vencimiento,
             paymentDate: p.fecha_pago,
             voucherUrl: p.comprobante_url,
+            paymentAmounts: [{
+              id: p.id,
+              amount: p.monto,
+              contractId: p.contrato_id,
+              dueDate: p.fecha_vencimiento,
+              paidAmount: Number(p.observacion?.match(/ABONO ACUMULADO: S\/\s*([\d.]+)/)?.[1] || 0),
+            }],
           });
         }
 
-        setAlerts(items);
+        const grouped = new Map<string, AlertItem[]>();
+        for (const item of items) {
+          const key = `${item.tenant.id}:${item.month || ''}:${item.status === 'aldia' ? 'aldia' : 'pendiente'}`;
+          const group = grouped.get(key) || [];
+          group.push(item);
+          grouped.set(key, group);
+        }
+        const consolidated: AlertItem[] = [];
+        for (const group of grouped.values()) {
+          if (group.length === 1) {
+            consolidated.push(group[0]);
+            continue;
+          }
+          const first = group[0];
+          const spaces = first.tenant.assignedSpaces?.length
+            ? first.tenant.assignedSpaces
+            : [...new Map(group.map((item) => [item.space.id, item.space])).values()];
+          const overdue = group.filter((item) => item.status === 'vencido');
+          const pending = group.filter((item) => item.status !== 'aldia');
+          const status: AlertStatus = pending.some((item) => item.status === 'abonado')
+            ? 'abonado'
+            : overdue.length ? 'vencido' : pending.length ? 'proximo' : 'aldia';
+          const dueDates = group.map((item) => item.dueDate).filter((value): value is string => Boolean(value)).sort();
+          consolidated.push({
+            ...first,
+            id: undefined,
+            paymentId: undefined,
+            contratoId: undefined,
+            paymentIds: group.flatMap((item) => item.paymentId ? [item.paymentId] : []),
+            contractIds: [...new Set(group.flatMap((item) => item.contratoId ? [item.contratoId] : []))],
+            paymentAmounts: group.flatMap((item) => item.paymentAmounts || []),
+            spaces,
+            space: spaces[0],
+            amount: group.reduce((sum, item) => sum + item.amount, 0),
+            paidAmount: group.reduce((sum, item) => sum + (item.paidAmount || 0), 0),
+            status,
+            daysLate: overdue.reduce((max, item) => Math.max(max, item.daysLate || 0), 0) || undefined,
+            daysUntilDue: status === 'proximo' ? Math.min(...pending.map((item) => item.daysUntilDue ?? Infinity)) : undefined,
+            dueDate: dueDates[0] || first.dueDate,
+            tenant: { ...first.tenant, spaceNumbers: spaces.map((space) => space.number) },
+          });
+        }
+        setAlerts(consolidated);
       } else {
         setAlerts([]);
       }
@@ -217,8 +279,7 @@ export function Dashboard({ onOpenTenant }: Props) {
 
   // Cálculos financieros dinámicos desde Supabase
   const totalCobrado = alerts
-    .filter((a) => a.status === 'aldia')
-    .reduce((sum, a) => sum + a.amount, 0);
+    .reduce((sum, a) => sum + (a.status === 'aldia' ? a.amount : a.paidAmount || 0), 0);
 
   const porCobrar = alerts
     .filter((a) => a.status !== 'aldia')
@@ -228,7 +289,7 @@ export function Dashboard({ onOpenTenant }: Props) {
   const cobradoPct = totalEsperado > 0 ? Math.round((totalCobrado / totalEsperado) * 100) : 0;
 
   const vencidos = alerts.filter((a) => a.status === 'vencido');
-  const proximos = alerts.filter((a) => a.status === 'proximo');
+  const proximos = alerts.filter((a) => a.status === 'proximo' || a.status === 'abonado');
   const aldia = alerts.filter((a) => a.status === 'aldia');
 
   return (
@@ -359,7 +420,7 @@ export function Dashboard({ onOpenTenant }: Props) {
             {proximos.length > 0 && (
               <SectionTitle
                 icon={<Clock size={16} className="text-amber-500" />}
-                label="Próximos vencimientos"
+                label="Próximos vencimientos y abonos"
                 count={proximos.length}
                 color="text-amber-600"
               />
@@ -462,7 +523,9 @@ function AlertCard({
               {alert.tenant.name}
             </p>
             <p className="text-xs text-gray-500">
-              {alert.space.floor} · {alert.space.type === 'local' ? 'Local' : 'Cuarto'} {alert.space.number}
+              {alert.spaces && alert.spaces.length > 1
+                ? `${[...new Set(alert.spaces.map((space) => `PISO ${space.floor}`))].join(', ')} · ${alert.spaces.every((space) => space.type === 'local') ? 'Locales' : 'Cuartos'}: ${alert.spaces.map((space) => space.number).join(', ')}`
+                : `${alert.space.floor} · ${alert.space.type === 'local' ? 'Local' : 'Cuarto'} ${alert.space.number}`}
             </p>
           </div>
         </button>
@@ -476,6 +539,7 @@ function AlertCard({
         <span className="text-xs font-medium text-gray-600 bg-white/70 px-2.5 py-1 rounded-full">
           {modalityLabel[alert.modality] || alert.modality}
         </span>
+        {alert.paidAmount ? <span className="text-xs font-bold text-purple-700 bg-purple-100 px-2.5 py-1 rounded-full">Abonado S/ {alert.paidAmount.toLocaleString('es-PE')}</span> : null}
         {alert.status === 'vencido' && alert.daysLate !== undefined && (
           <span className="text-xs font-bold text-red-600 bg-red-100 px-2.5 py-1 rounded-full">
             {alert.daysLate} día{alert.daysLate > 1 ? 's' : ''} de retraso

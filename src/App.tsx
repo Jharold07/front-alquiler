@@ -45,6 +45,11 @@ function App() {
     setTenantView(null);
   }
 
+  function returnToTenantsAfterDelete() {
+    setTenantView(null);
+    setTab('inquilinos');
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 sm:py-3 flex justify-center">
       {/* Main app container */}
@@ -52,7 +57,7 @@ function App() {
         {/* Content */}
         <div className="flex-1 overflow-y-auto pb-24">
           {tenantView ? (
-            <TenantProfile tenantId={tenantView} onBack={backFromTenant} />
+            <TenantProfile tenantId={tenantView} onBack={backFromTenant} onDeleted={returnToTenantsAfterDelete} />
           ) : tab === 'inicio' ? (
             <Dashboard onOpenTenant={openTenant} />
           ) : tab === 'espacios' ? (
